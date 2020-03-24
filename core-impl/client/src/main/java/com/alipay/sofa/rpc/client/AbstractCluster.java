@@ -17,7 +17,10 @@
 package com.alipay.sofa.rpc.client;
 
 import com.alipay.sofa.rpc.bootstrap.ConsumerBootstrap;
+import com.alipay.sofa.rpc.client.http.RpcHttpClient;
+import com.alipay.sofa.rpc.common.MockMode;
 import com.alipay.sofa.rpc.common.RpcConstants;
+import com.alipay.sofa.rpc.common.json.JSON;
 import com.alipay.sofa.rpc.common.utils.ClassUtils;
 import com.alipay.sofa.rpc.common.utils.CommonUtils;
 import com.alipay.sofa.rpc.common.utils.StringUtils;
@@ -35,6 +38,7 @@ import com.alipay.sofa.rpc.core.response.SofaResponse;
 import com.alipay.sofa.rpc.dynamic.DynamicConfigKeys;
 import com.alipay.sofa.rpc.dynamic.DynamicConfigManager;
 import com.alipay.sofa.rpc.dynamic.DynamicConfigManagerFactory;
+import com.alipay.sofa.rpc.dynamic.DynamicHelper;
 import com.alipay.sofa.rpc.event.EventBus;
 import com.alipay.sofa.rpc.event.ProviderInfoAddEvent;
 import com.alipay.sofa.rpc.event.ProviderInfoRemoveEvent;
@@ -52,8 +56,10 @@ import com.alipay.sofa.rpc.transport.ClientTransport;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.alipay.sofa.rpc.client.ProviderInfoAttrs.ATTR_TIMEOUT;
@@ -152,7 +158,7 @@ public abstract class AbstractCluster extends Cluster {
         } catch (SofaRpcRuntimeException e) {
             throw e;
         } catch (Throwable e) {
-            throw new SofaRpcRuntimeException("Init provider's transport error!", e);
+            throw new SofaRpcRuntimeException(LogCodes.getLog(LogCodes.ERROR_INIT_PROVIDER_TRANSPORT), e);
         }
 
         // 启动成功
@@ -160,9 +166,7 @@ public abstract class AbstractCluster extends Cluster {
 
         // 如果check=true表示强依赖
         if (consumerConfig.isCheck() && !isAvailable()) {
-            throw new SofaRpcRuntimeException("The consumer is depend on alive provider " +
-                "and there is no alive provider, you can ignore it " +
-                "by ConsumerConfig.setCheck(boolean) (default is false)");
+            throw new SofaRpcRuntimeException(LogCodes.getLog(LogCodes.ERROR_CHECK_ALIVE_PROVIDER));
         }
     }
 
@@ -171,7 +175,7 @@ public abstract class AbstractCluster extends Cluster {
      */
     protected void checkClusterState() {
         if (destroyed) { // 已销毁
-            throw new SofaRpcRuntimeException("Client has been destroyed!");
+            throw new SofaRpcRuntimeException(LogCodes.getLog(LogCodes.ERROR_CLIENT_DESTROYED));
         }
         if (!initialized) { // 未初始化
             init();
@@ -281,10 +285,15 @@ public abstract class AbstractCluster extends Cluster {
     public SofaResponse invoke(SofaRequest request) throws SofaRpcException {
         SofaResponse response = null;
         try {
+            //为什么要放在这里，因为走了filter的话，就要求有地址了
+            if (consumerConfig.isMock()) {
+                return doMockInvoke(request);
+            }
+
             // 做一些初始化检查，例如未连接可以连接
             checkClusterState();
             // 开始调用
-            countOfInvoke.incrementAndGet(); // 计数+1         
+            countOfInvoke.incrementAndGet(); // 计数+1
             response = doInvoke(request);
             return response;
         } catch (SofaRpcException e) {
@@ -292,6 +301,39 @@ public abstract class AbstractCluster extends Cluster {
             throw e;
         } finally {
             countOfInvoke.decrementAndGet(); // 计数-1
+        }
+    }
+
+    protected SofaResponse doMockInvoke(SofaRequest request) {
+        final String mockMode = consumerConfig.getMockMode();
+        if (MockMode.LOCAL.equalsIgnoreCase(mockMode)) {
+            SofaResponse response;
+            Object mockObject = consumerConfig.getMockRef();
+            response = new SofaResponse();
+            try {
+                Object appResponse = request.getMethod().invoke(mockObject, request.getMethodArgs());
+                response.setAppResponse(appResponse);
+            } catch (Throwable e) {
+                response.setErrorMsg(e.getMessage());
+            }
+            return response;
+        } else if (MockMode.REMOTE.equalsIgnoreCase(mockMode)) {
+            SofaResponse response = new SofaResponse();
+            try {
+                final String mockUrl = consumerConfig.getParameter("mockUrl");
+                Map<String, Object> parameters = new HashMap<>();
+                parameters.put("targetServiceUniqueName", request.getTargetServiceUniqueName());
+                parameters.put("methodName", request.getMethodName());
+                parameters.put("methodArgs", request.getMethodArgs());
+                parameters.put("methodArgSigs", request.getMethodArgSigs());
+                Object mockAppResponse=  RpcHttpClient.getInstance().doPost(mockUrl,JSON.toJSONString(parameters),request.getMethod().getReturnType());
+                response.setAppResponse(mockAppResponse);
+            } catch (Throwable e) {
+                response.setErrorMsg(e.getMessage());
+            }
+            return response;
+        } else {
+            throw new SofaRpcException("Can not recognize the mockMode " + mockMode);
         }
     }
 
@@ -622,7 +664,7 @@ public abstract class AbstractCluster extends Cluster {
                     "timeout");
             }
 
-            if (StringUtils.isNotBlank(dynamicTimeout)) {
+            if (DynamicHelper.isNotDefault(dynamicTimeout) && StringUtils.isNotBlank(dynamicTimeout)) {
                 return Integer.parseInt(dynamicTimeout);
             }
         }

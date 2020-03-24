@@ -14,22 +14,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.alipay.sofa.rpc.hystrix;
+package com.alipay.sofa.rpc.common;
 
-import com.alipay.sofa.rpc.test.HelloService;
+public class MockMode {
 
-/**
- * @author <a href=mailto:scienjus@gmail.com>ScienJus</a>
- */
-public class HelloServiceFallbackFactory implements FallbackFactory<HelloService> {
-    @Override
-    public HelloService create(final FallbackContext context) {
-        return new HelloService() {
-            @Override
-            public String sayHello(String name, int age) {
-                return "fallback " + name + " from server! age: " + age + ", error: " +
-                    context.getException().getClass().getName();
-            }
-        };
-    }
+    public static final String LOCAL  = "local";
+    public static final String REMOTE = "remote";
 }

@@ -14,27 +14,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.alipay.sofa.rpc.hystrix;
+package com.alipay.sofa.rpc.dynamic;
 
-import com.alipay.sofa.rpc.test.HelloServiceImpl;
+import com.alipay.sofa.rpc.common.utils.StringUtils;
 
-import java.util.concurrent.atomic.AtomicInteger;
+public class DynamicHelper {
 
-public class InvokeCounterHelloService extends HelloServiceImpl {
+    public static final String DEFAULT_DYNAMIC_VALUE = "RPC_DEFAULT_DYNAMIC_VALUE";
 
-    private AtomicInteger executeCount = new AtomicInteger(0);
+    public static boolean isNotDefault(String value) {
 
-    public InvokeCounterHelloService(int sleep) {
-        super(sleep);
-    }
+        if (StringUtils.equals(value, DEFAULT_DYNAMIC_VALUE)) {
+            return false;
+        } else {
+            return true;
+        }
 
-    @Override
-    public String sayHello(String name, int age) {
-        executeCount.incrementAndGet();
-        return super.sayHello(name, age);
-    }
-
-    public int getExecuteCount() {
-        return executeCount.get();
     }
 }
